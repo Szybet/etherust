@@ -11,3 +11,7 @@ name = "etherust"
 [dependencies]
 ggez = "0.7"
 glam = { version = "0.20", features = ["mint"]}
+gfx = "0.18"
+gfx_core = "0.9"
+gfx_device_gl = "0.16"
+rand = "0.8.4"

@@ -1,7 +1,10 @@
 //! The simplest possible example that does something.
 #![allow(clippy::unnecessary_wraps)]
+#![windows_subsystem = "windows"]
 
+use ggez::conf::Backend;
 use ggez::conf::FullscreenType;
+use ggez::conf::ModuleConf;
 use ggez::conf::NumSamples;
 use ggez::conf::WindowMode;
 use ggez::conf::WindowSetup;
@@ -433,7 +436,12 @@ pub fn main() -> GameResult {
 
     let cb = ggez::ContextBuilder::new("etherust", "szybet")
         .window_setup(window_settings)
-        .window_mode(windowmode);
+        .window_mode(windowmode)
+        .modules(ModuleConf {
+            audio: false,
+            gamepad: false,
+        })
+        .backend(Backend::OpenGL { major: 3, minor: 2 });
 
     let (mut ctx, event_loop) = cb.build()?;
     let mut state = MainState::new(&mut ctx)?;

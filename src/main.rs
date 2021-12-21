@@ -20,10 +20,12 @@ use ggez::graphics::{self, Color, DrawMode, Rect};
 use ggez::input::mouse::position;
 use ggez::input::mouse::*;
 use ggez::mint::Point2;
+use ggez::timer;
 use ggez::{Context, GameResult};
 use glam::*;
 use rand::Rng;
 use std::env;
+use std::include_bytes;
 use std::path;
 use std::path::PathBuf;
 
@@ -54,34 +56,54 @@ pub struct static_rect_data_destination {
     connected: i32,
 }
 
+pub struct text_time {
+    text: Text,
+    cord: Vec2,
+    color: Color,
+    text_id: i32,
+    time_static: i32,
+    time_count: i32,
+}
+
 pub struct MainState {
     static_objects: Vec<static_rect_data>,
     static_objects_destination: Vec<static_rect_data_destination>,
     static_buttons: Vec<static_rect_button>,
+    timed_text: Vec<text_time>,
     object_grabbed: i32,
     main: graphics::Image,
     true_image: graphics::Image,
     false_image: graphics::Image,
     points: i32,
     pause: bool,
+    main_font: Font,
+    requested_text: Vec<i32>,
+    mode: String,
 }
 
 impl MainState {
     fn new(ctx: &mut Context) -> GameResult<MainState> {
-        let main = graphics::Image::new(ctx, "/Main.png")?;
-        let true_image = graphics::Image::new(ctx, "/true.png")?;
-        let false_image = graphics::Image::new(ctx, "/false.png")?;
+        let main = graphics::Image::from_bytes(ctx, include_bytes!("../resources/Main.png"))?;
+        let true_image = graphics::Image::from_bytes(ctx, include_bytes!("../resources/true.png"))?;
+        let false_image =
+            graphics::Image::from_bytes(ctx, include_bytes!("../resources/false.png"))?;
+        let font =
+            Font::new_glyph_font_bytes(ctx, include_bytes!("../resources/font.ttf")).unwrap();
 
         let pos = MainState {
             static_objects: Vec::new(),
             static_objects_destination: Vec::new(),
             static_buttons: Vec::new(),
+            timed_text: Vec::new(),
             object_grabbed: 1000,
             main,
             true_image,
             false_image,
             points: 0,
             pause: false,
+            main_font: font,
+            requested_text: Vec::new(),
+            mode: String::new(),
         };
         Ok(pos)
     }
@@ -151,56 +173,105 @@ impl event::EventHandler<ggez::GameError> for MainState {
             }
         }
 
-        let buttons_clicked = manage_all_buttons(ctx, &mut self.static_buttons, rect_cord_mouse);
+        let buttons_clicked =
+            manage_all_buttons(ctx, &mut self.static_buttons, rect_cord_mouse, self.pause);
         if buttons_clicked.contains(&0) {
             declare_variables(self, ctx);
         }
         if buttons_clicked.contains(&1) {
             if self.pause == false {
-                let x_sum: f32 = 44.0;
-                let mut x_cord: f32 = 860.0;
-                let mut points = 0;
-
+                let mut correctly_connected: bool = true;
                 for connects in &self.static_objects_destination {
-                    let dst = glam::Vec2::new(x_cord, 723.0);
-                    if connects.object_id == connects.connected {
-                        graphics::draw(ctx, &self.true_image, (dst,));
-                        points = points + 1;
-                    } else {
-                        graphics::draw(ctx, &self.false_image, (dst,));
-                        points = points - 1;
+                    if connects.connected == 1000 {
+                        correctly_connected = false;
                     }
-                    x_cord = x_cord + x_sum;
                 }
-                self.pause = true;
-                self.points = points;
+                if correctly_connected == true {
+                    if self.pause == false {
+                        let mut points = 0;
+                        for connects in &self.static_objects_destination {
+                            if connects.object_id == connects.connected {
+                                points = points + 1;
+                            } else {
+                                points = points - 1;
+                            }
+                        }
+                        self.pause = true;
+                        self.points = self.points + points;
+                    }
+                } else {
+                    if self.requested_text.contains(&0) == false {
+                        self.requested_text.push(0);
+                    }
+                }
+            } else {
+                if self.requested_text.contains(&1) == false {
+                    self.requested_text.push(1);
+                }
             }
         }
 
-        let font = Font::new(ctx, "/font.ttf").unwrap();
-        let uniform_scale_24px = PxScale::from(24.0);
+        if self.pause == true {
+            let x_sum: f32 = 44.0;
+            let mut x_cord: f32 = 860.0;
+            for connects in &self.static_objects_destination {
+                let dst = glam::Vec2::new(x_cord, 723.0);
+                if connects.object_id == connects.connected {
+                    graphics::draw(ctx, &self.true_image, (dst,));
+                } else {
+                    graphics::draw(ctx, &self.false_image, (dst,));
+                }
+                x_cord = x_cord + x_sum;
+            }
+        }
 
-        let string_text = self.points.to_string();
-        let mut text_fragment = TextFragment::new(string_text)
-            .font(font)
-            .scale(uniform_scale_24px)
-            .color(Color::new(0.0, 1.0, 1.0, 1.0));
+        let uniform_scale_24px = PxScale::from(70.0);
+        let mut points_text = Text::new(format!("Points: {}", self.points));
+        points_text.set_font(self.main_font, uniform_scale_24px);
 
-        let mut text: Text = Text::new(text_fragment);
-        let dst = glam::Vec2::new(300.0, 300.0);
+        graphics::draw(ctx, &points_text, (Vec2::new(30.0, 300.0), Color::WHITE))?;
 
-        graphics::queue_text(ctx, &text, dst, Some(Color::new(0.0, 1.0, 1.0, 1.0)));
-        // check cos nie dziala
-        graphics::draw_queued_text(
-            ctx,
-            DrawParam::default(),
-            Some(BlendMode::from(BlendMode::Add)),
-            FilterMode::Nearest,
-        )
-        .unwrap();
+        if self.requested_text.is_empty() == false {
+            manage_requested_text(ctx, &mut self.timed_text, &mut self.requested_text)
+        }
+
+        let mut mode_text = Text::new(format!("{}", self.mode));
+        mode_text.set_font(self.main_font, PxScale::from(140.0));
+
+        graphics::draw(ctx, &mode_text, (Vec2::new(425.0, 30.0), Color::WHITE))?;
 
         graphics::present(ctx)?;
         Ok(())
+    }
+}
+
+pub fn manage_requested_text(ctx: &mut Context, text_vec: &mut Vec<text_time>, ids: &mut Vec<i32>) {
+    for id in ids.clone() {
+        for text in &mut *text_vec {
+            if text.text_id == id {
+                graphics::draw(ctx, &text.text, (text.cord, text.color)).unwrap();
+                text.time_count = text.time_count - 1;
+                if text.time_count == 0 {
+                    text.time_count = text.time_static;
+
+                    let index = ids.iter().position(|&r| r == id);
+                    match index {
+                        Some(x) => {
+                            ids.remove(x);
+                        }
+                        None => (),
+                    }
+
+                    /*
+                    if ids.contains(&id) == true {
+                        // thats the worst part of code in this file
+                        let index = ids.iter().position(|&r| r == id).unwrap();
+                        ids.remove(index);
+                    }
+                    */
+                }
+            }
+        }
     }
 }
 
@@ -208,6 +279,7 @@ pub fn manage_all_buttons(
     ctx: &mut Context,
     mut vector: &mut Vec<static_rect_button>,
     rect_cord_mouse: Rect,
+    pause: bool,
 ) -> Vec<i32> {
     let mut clicked_buttons: Vec<i32> = Vec::new();
     for mut button in vector {
@@ -359,18 +431,9 @@ pub fn main() -> GameResult {
         resize_on_scale_factor_change: false,
     };
 
-    let resource_dir = if let Ok(manifest_dir) = env::var("CARGO_MANIFEST_DIR") {
-        let mut path = path::PathBuf::from(manifest_dir);
-        path.push("resources");
-        path
-    } else {
-        path::PathBuf::from("./resources")
-    };
-
     let cb = ggez::ContextBuilder::new("etherust", "szybet")
         .window_setup(window_settings)
-        .window_mode(windowmode)
-        .add_resource_path(resource_dir);
+        .window_mode(windowmode);
 
     let (mut ctx, event_loop) = cb.build()?;
     let mut state = MainState::new(&mut ctx)?;
@@ -390,96 +453,63 @@ pub fn declare_variables(mut state: &mut MainState, ctx: &mut Context) {
     state.object_grabbed = 1000;
     state.pause = false;
 
-    // Here are defined static objects ( this could be done in for in )
-    let mut rec_0 = static_rect_data {
-        object_grabbed: false,
-        diffrence_y: 0.0,
-        diffrence_x: 0.0,
-        color: color_transparent,
-        rect_cord: Rect::new(0.0, location.y, 25.0, 450.0),
-        object_id: 0,
-        texture: graphics::Image::new(ctx, "/T568B/0.png").unwrap(),
-    };
-    state.static_objects.push(rec_0);
+    let mut cables_vec = Vec::new();
+    let cable_0_byt = include_bytes!("../resources/cables/0.png");
+    let cable_1_byt = include_bytes!("../resources/cables/1.png");
+    let cable_2_byt = include_bytes!("../resources/cables/2.png");
+    let cable_3_byt = include_bytes!("../resources/cables/3.png");
+    let cable_4_byt = include_bytes!("../resources/cables/4.png");
+    let cable_5_byt = include_bytes!("../resources/cables/5.png");
+    let cable_6_byt = include_bytes!("../resources/cables/6.png");
+    let cable_7_byt = include_bytes!("../resources/cables/7.png");
 
-    let mut rec_1 = static_rect_data {
-        object_grabbed: false,
-        diffrence_y: 0.0,
-        diffrence_x: 0.0,
-        color: color_transparent,
-        rect_cord: Rect::new(0.0, location.y, 25.0, 450.0),
-        object_id: 1,
-        texture: graphics::Image::new(ctx, "/T568B/1.png").unwrap(),
-    };
-    state.static_objects.push(rec_1);
+    let mut rng = rand::thread_rng();
+    if rng.gen_range(0..2) == 0 {
+        // here is type B
+        cables_vec = vec![
+            &cable_0_byt[..],
+            &cable_1_byt[..],
+            &cable_2_byt[..],
+            &cable_3_byt[..],
+            &cable_4_byt[..],
+            &cable_5_byt[..],
+            &cable_6_byt[..],
+            &cable_7_byt[..],
+        ];
+        state.mode = String::from("T568B");
+    } else {
+        // here is type A
+        cables_vec = vec![
+            &cable_2_byt[..],
+            &cable_5_byt[..],
+            &cable_0_byt[..],
+            &cable_3_byt[..],
+            &cable_4_byt[..],
+            &cable_1_byt[..],
+            &cable_6_byt[..],
+            &cable_7_byt[..],
+        ];
+        state.mode = String::from("T568A");
+    }
 
-    let mut rec_2 = static_rect_data {
-        object_grabbed: false,
-        diffrence_y: 0.0,
-        diffrence_x: 0.0,
-        color: color_transparent,
-        rect_cord: Rect::new(0.0, location.y, 25.0, 450.0),
-        object_id: 2,
-        texture: graphics::Image::new(ctx, "/T568B/2.png").unwrap(),
-    };
-    state.static_objects.push(rec_2);
+    let mut count_i32: i32 = 0;
+    for num in 0..8 {
+        let cable_file = cables_vec.iter().nth(num).unwrap();
 
-    let mut rec_3 = static_rect_data {
-        object_grabbed: false,
-        diffrence_y: 0.0,
-        diffrence_x: 0.0,
-        color: color_transparent,
-        rect_cord: Rect::new(0.0, location.y, 25.0, 450.0),
-        object_id: 3,
-        texture: graphics::Image::new(ctx, "/T568B/3.png").unwrap(),
-    };
-    state.static_objects.push(rec_3);
+        let mut rec = static_rect_data {
+            object_grabbed: false,
+            diffrence_y: 0.0,
+            diffrence_x: 0.0,
+            color: color_transparent,
+            rect_cord: Rect::new(0.0, location.y, 25.0, 450.0),
+            object_id: count_i32,
+            texture: graphics::Image::from_bytes(ctx, cable_file).unwrap(),
+        };
+        state.static_objects.push(rec);
+        count_i32 = count_i32 + 1;
+    }
 
-    let mut rec_4 = static_rect_data {
-        object_grabbed: false,
-        diffrence_y: 0.0,
-        diffrence_x: 0.0,
-        color: color_transparent,
-        rect_cord: Rect::new(0.0, location.y, 25.0, 450.0),
-        object_id: 4,
-        texture: graphics::Image::new(ctx, "/T568B/4.png").unwrap(),
-    };
-    state.static_objects.push(rec_4);
-
-    let mut rec_5 = static_rect_data {
-        object_grabbed: false,
-        diffrence_y: 0.0,
-        diffrence_x: 0.0,
-        color: color_transparent,
-        rect_cord: Rect::new(0.0, location.y, 25.0, 450.0),
-        object_id: 5,
-        texture: graphics::Image::new(ctx, "/T568B/5.png").unwrap(),
-    };
-    state.static_objects.push(rec_5);
-
-    let mut rec_6 = static_rect_data {
-        object_grabbed: false,
-        diffrence_y: 0.0,
-        diffrence_x: 0.0,
-        color: color_transparent,
-        rect_cord: Rect::new(0.0, location.y, 25.0, 450.0),
-        object_id: 6,
-        texture: graphics::Image::new(ctx, "/T568B/6.png").unwrap(),
-    };
-    state.static_objects.push(rec_6);
-
-    let mut rec_7 = static_rect_data {
-        object_grabbed: false,
-        diffrence_y: 0.0,
-        diffrence_x: 0.0,
-        color: color_transparent,
-        rect_cord: Rect::new(0.0, location.y, 25.0, 450.0),
-        object_id: 7,
-        texture: graphics::Image::new(ctx, "/T568B/7.png").unwrap(),
-    };
-    state.static_objects.push(rec_7);
-
-    for looping in 0..12 {
+    for looping in 0..20 {
         let mut rng = rand::thread_rng();
         let random = rng.gen_range(0..8);
         let copy = state.static_objects.remove(random);
@@ -513,8 +543,13 @@ pub fn declare_variables(mut state: &mut MainState, ctx: &mut Context) {
 
     let mut button_reset = static_rect_button {
         color: color_transparent,
-        button_image: graphics::Image::new(ctx, "/Reset.png").unwrap(),
-        button_image_clicked: graphics::Image::new(ctx, "/Reset-clicked.png").unwrap(),
+        button_image: graphics::Image::from_bytes(ctx, include_bytes!("../resources/Reset.png"))
+            .unwrap(),
+        button_image_clicked: graphics::Image::from_bytes(
+            ctx,
+            include_bytes!("../resources/Reset-clicked.png"),
+        )
+        .unwrap(),
         rect_cord: Rect::new(30.0, 30.0, 250.0, 100.0),
         button_id: 0,
         clicked_frames: 119,
@@ -523,11 +558,43 @@ pub fn declare_variables(mut state: &mut MainState, ctx: &mut Context) {
 
     let mut check_button = static_rect_button {
         color: color_transparent,
-        button_image: graphics::Image::new(ctx, "/Check.png").unwrap(),
-        button_image_clicked: graphics::Image::new(ctx, "/Check-clicked.png").unwrap(),
+        button_image: graphics::Image::from_bytes(ctx, include_bytes!("../resources/Check.png"))
+            .unwrap(),
+        button_image_clicked: graphics::Image::from_bytes(
+            ctx,
+            include_bytes!("../resources/Check-clicked.png"),
+        )
+        .unwrap(),
         rect_cord: Rect::new(30.0, 150.0, 235.0, 100.0),
         button_id: 1,
         clicked_frames: 0,
     };
     state.static_buttons.push(check_button);
+
+    // Here is timed text
+    let mut check_error_text = Text::new(format!("Connect all cables first!"));
+    check_error_text.set_font(state.main_font, PxScale::from(30.0));
+
+    let mut check_error_cables = text_time {
+        text: check_error_text,
+        cord: Vec2::new(20.0, 250.0),
+        color: Color::RED,
+        text_id: 0,
+        time_static: 300,
+        time_count: 300,
+    };
+    state.timed_text.push(check_error_cables);
+
+    let mut check_error_text = Text::new(format!("Now click Reset"));
+    check_error_text.set_font(state.main_font, PxScale::from(45.0));
+
+    let mut check_error_cables = text_time {
+        text: check_error_text,
+        cord: Vec2::new(30.0, 250.0),
+        color: Color::RED,
+        text_id: 1,
+        time_static: 300,
+        time_count: 300,
+    };
+    state.timed_text.push(check_error_cables);
 }

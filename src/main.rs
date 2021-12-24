@@ -112,7 +112,7 @@ pub struct Settings {
 impl Settings {
     fn new(ctx: &mut Context) -> GameResult<Settings> {
         let pos = Settings {
-            clear_mode: true,
+            clear_mode: false,
             sliders: Vec::new(),
             buttons: Vec::new(),
         };
@@ -320,7 +320,38 @@ impl event::EventHandler<ggez::GameError> for MainState {
             let buttons_clicked =
                 manage_all_buttons(ctx, &mut self.static_buttons, rect_cord_mouse);
             if buttons_clicked.contains(&0) {
-                declare_variables(self, ctx); // here it is, and oh no
+                if self.settings.clear_mode == true {
+                    if self.pause == true {
+                        let mut remove_cables_not_connected_properly: Vec<i32> = Vec::new();
+                        for connects in &self.static_objects_destination {
+                            if connects.connected == connects.object_id {
+                            } else {
+                                remove_cables_not_connected_properly.push(connects.object_id);
+                            }
+                        }
+                        if remove_cables_not_connected_properly.is_empty() == true {
+                            remove_cables_not_connected_properly = vec![0, 1, 2, 3, 4, 5, 6, 7];
+                            // Optional, does not work?
+                            /*
+                            let mut text = Text::new(format!("All correct!"));
+                            text.set_font(self.main_font, PxScale::from(200.0));
+                            let all_correct = text_time {
+                                text: text,
+                                cord: glam::Vec2::new(400.0, 400.0),
+                                color: Color::GREEN,
+                                text_id: 20,
+                                time_static: 240,
+                                time_count: 0,
+                            };
+                            self.timed_text.push(all_correct);
+                            */
+                        }
+                        declare_variables(self, ctx, remove_cables_not_connected_properly);
+                        // here it is, and oh no
+                    }
+                } else {
+                    declare_variables(self, ctx, vec![0, 1, 2, 3, 4, 5, 6, 7]); // here it is, and oh no
+                }
             }
             if buttons_clicked.contains(&1) {
                 if self.pause == false {
@@ -622,24 +653,58 @@ pub fn main() -> GameResult {
         .window_setup(window_settings)
         .window_mode(windowmode)
         //.modules(ModuleConf {
-         //   audio: false,
-         //   gamepad: false,
+        //   audio: false,
+        //   gamepad: false,
         //})
         .backend(Backend::OpenGL { major: 3, minor: 2 });
 
     let (mut ctx, event_loop) = cb.build()?;
     let mut state = MainState::new(&mut ctx)?;
 
-    declare_variables(&mut state, &mut ctx);
+    // Settings
+    // Sliders for settings
+    let mut clearmode = static_rect_slider {
+        cord: Vec2::new(100.0, 200.0),
+        slider_id: 0,
+        frames: 0.0,
+        going_mode_on: false,
+        clicked_wait: 0,
+        text: String::from("If True, reset clears only not guessed cables"),
+    };
+    state.settings.sliders.push(clearmode);
+
+    let mut settings_button = static_rect_button {
+        color: Color::new(0.255, 0.255, 0.255, 0.0),
+        button_image: graphics::Image::from_bytes(
+            &mut ctx,
+            include_bytes!("../resources/settings.png"),
+        )
+        .unwrap(),
+        button_image_clicked: graphics::Image::from_bytes(
+            &mut ctx,
+            include_bytes!("../resources/settings-clicked.png"),
+        )
+        .unwrap(),
+        rect_cord: Rect::new(30.0, 720.0, 40.0, 40.0),
+        button_id: 2, // becouse the same like in main
+        clicked_frames: 0,
+    };
+    state.settings.buttons.push(settings_button);
+    // Settings end
+
+    declare_variables(&mut state, &mut ctx, vec![0, 1, 2, 3, 4, 5, 6, 7]);
 
     event::run(ctx, event_loop, state)
 }
 
-pub fn declare_variables(mut state: &mut MainState, ctx: &mut Context) {
+pub fn declare_variables(
+    mut state: &mut MainState,
+    ctx: &mut Context,
+    state_static_objects_to_delete: Vec<i32>,
+) {
     let color_transparent = Color::new(0.255, 0.255, 0.255, 0.0);
     let mut location: Point2<f32> = Point2::from([400.0, 300.0]);
 
-    state.static_objects = Vec::new();
     state.static_objects_destination = Vec::new();
     state.static_buttons = Vec::new();
     state.object_grabbed = 1000;
@@ -655,50 +720,90 @@ pub fn declare_variables(mut state: &mut MainState, ctx: &mut Context) {
     let cable_6_byt = include_bytes!("../resources/cables/6.png");
     let cable_7_byt = include_bytes!("../resources/cables/7.png");
 
-    let mut rng = rand::thread_rng();
-    if rng.gen_range(0..2) == 0 {
-        // here is type B
-        cables_vec = vec![
-            &cable_0_byt[..],
-            &cable_1_byt[..],
-            &cable_2_byt[..],
-            &cable_3_byt[..],
-            &cable_4_byt[..],
-            &cable_5_byt[..],
-            &cable_6_byt[..],
-            &cable_7_byt[..],
-        ];
-        state.mode = String::from("T568B");
+    if state_static_objects_to_delete == vec![0, 1, 2, 3, 4, 5, 6, 7] {
+        let mut rng = rand::thread_rng();
+        if rng.gen_range(0..2) == 0 {
+            // here is type B
+            cables_vec = vec![
+                &cable_0_byt[..],
+                &cable_1_byt[..],
+                &cable_2_byt[..],
+                &cable_3_byt[..],
+                &cable_4_byt[..],
+                &cable_5_byt[..],
+                &cable_6_byt[..],
+                &cable_7_byt[..],
+            ];
+            state.mode = String::from("T568B");
+        } else {
+            // here is type A
+            cables_vec = vec![
+                &cable_2_byt[..],
+                &cable_5_byt[..],
+                &cable_0_byt[..],
+                &cable_3_byt[..],
+                &cable_4_byt[..],
+                &cable_1_byt[..],
+                &cable_6_byt[..],
+                &cable_7_byt[..],
+            ];
+            state.mode = String::from("T568A");
+        }
     } else {
-        // here is type A
-        cables_vec = vec![
-            &cable_2_byt[..],
-            &cable_5_byt[..],
-            &cable_0_byt[..],
-            &cable_3_byt[..],
-            &cable_4_byt[..],
-            &cable_1_byt[..],
-            &cable_6_byt[..],
-            &cable_7_byt[..],
-        ];
-        state.mode = String::from("T568A");
+        if state.mode == "T568B" {
+            cables_vec = vec![
+                &cable_0_byt[..],
+                &cable_1_byt[..],
+                &cable_2_byt[..],
+                &cable_3_byt[..],
+                &cable_4_byt[..],
+                &cable_5_byt[..],
+                &cable_6_byt[..],
+                &cable_7_byt[..],
+            ];
+        } else {
+            cables_vec = vec![
+                &cable_2_byt[..],
+                &cable_5_byt[..],
+                &cable_0_byt[..],
+                &cable_3_byt[..],
+                &cable_4_byt[..],
+                &cable_1_byt[..],
+                &cable_6_byt[..],
+                &cable_7_byt[..],
+            ];
+        }
     }
 
-    let mut count_i32: i32 = 0;
     for num in 0..8 {
-        let cable_file = cables_vec.iter().nth(num).unwrap();
+        if state_static_objects_to_delete.contains(&num) {
+            let mut remove_index: usize = 1000;
+            // There is a better way to do this
+            let mut count_for: i32 = 0;
+            for stat_objects in &state.static_objects {
+                if stat_objects.object_id == num {
+                    remove_index = count_for as usize;
+                }
+                count_for = count_for + 1;
+            }
+            if remove_index != 1000 {
+                state.static_objects.remove(remove_index);
+            }
+            //
 
-        let mut rec = static_rect_data {
-            object_grabbed: false,
-            diffrence_y: 0.0,
-            diffrence_x: 0.0,
-            color: color_transparent,
-            rect_cord: Rect::new(0.0, location.y, 25.0, 450.0),
-            object_id: count_i32,
-            texture: graphics::Image::from_bytes(ctx, cable_file).unwrap(),
-        };
-        state.static_objects.push(rec);
-        count_i32 = count_i32 + 1;
+            let cable_file = cables_vec.iter().nth(num as usize).unwrap();
+
+            let mut rec = static_rect_data {
+                object_grabbed: false,
+                diffrence_y: 0.0,
+                diffrence_x: 0.0,
+                color: color_transparent,
+                rect_cord: Rect::new(0.0, location.y, 25.0, 450.0),
+                object_id: num,
+                texture: graphics::Image::from_bytes(ctx, cable_file).unwrap(),
+            };
+            state.static_objects.push(rec);
+        }
     }
 
     for looping in 0..20 {
@@ -709,8 +814,10 @@ pub fn declare_variables(mut state: &mut MainState, ctx: &mut Context) {
     }
 
     for rec in &mut state.static_objects {
-        rec.rect_cord.x = location.x;
-        location.x = location.x + 50.0;
+        if state_static_objects_to_delete.contains(&rec.object_id) == true {
+            rec.rect_cord.x = location.x;
+            location.x = location.x + 50.0;
+        }
     }
 
     // Here are defined static_rect_data_destination
@@ -804,30 +911,4 @@ pub fn declare_variables(mut state: &mut MainState, ctx: &mut Context) {
         time_count: 300,
     };
     state.timed_text.push(check_error_cables);
-
-    // Sliders for settings
-    let mut clearmode = static_rect_slider {
-        cord: Vec2::new(100.0, 200.0),
-        slider_id: 0,
-        frames: 0.0,
-        going_mode_on: false,
-        clicked_wait: 0,
-        text: String::from("If True, reset clears only not guessed cables"),
-    };
-    state.settings.sliders.push(clearmode);
-
-    let mut settings_button = static_rect_button {
-        color: color_transparent,
-        button_image: graphics::Image::from_bytes(ctx, include_bytes!("../resources/settings.png"))
-            .unwrap(),
-        button_image_clicked: graphics::Image::from_bytes(
-            ctx,
-            include_bytes!("../resources/settings-clicked.png"),
-        )
-        .unwrap(),
-        rect_cord: Rect::new(30.0, 720.0, 40.0, 40.0),
-        button_id: 2, // becouse the same like in main
-        clicked_frames: 0,
-    };
-    state.settings.buttons.push(settings_button);
 }

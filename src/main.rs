@@ -10,16 +10,23 @@ use ggez::conf::WindowMode;
 use ggez::conf::WindowSetup;
 use ggez::event;
 use ggez::graphics::BlendMode;
+use ggez::graphics::DrawMode;
+use ggez::graphics::DrawMode::Stroke;
 use ggez::graphics::DrawParam;
 use ggez::graphics::FilterMode;
 use ggez::graphics::Font;
 use ggez::graphics::GlBackendSpec;
 use ggez::graphics::ImageGeneric;
+use ggez::graphics::LineCap;
+use ggez::graphics::LineCap::Butt;
+use ggez::graphics::LineJoin;
+use ggez::graphics::LineJoin::Miter;
 use ggez::graphics::Mesh;
 use ggez::graphics::PxScale;
+use ggez::graphics::StrokeOptions;
 use ggez::graphics::Text;
 use ggez::graphics::TextFragment;
-use ggez::graphics::{self, Color, DrawMode, Rect};
+use ggez::graphics::{self, Color, Rect};
 use ggez::input::mouse::position;
 use ggez::input::mouse::*;
 use ggez::mint::Point2;
@@ -30,7 +37,8 @@ use rand::Rng;
 use std::env;
 use std::include_bytes;
 use std::path;
-use std::path::PathBuf;
+use std::process;
+use std::{thread, time};
 
 #[derive(Clone, Debug)]
 pub struct static_rect_data {
@@ -50,6 +58,15 @@ pub struct static_rect_button {
     button_image_clicked: graphics::Image,
     button_id: i32,
     clicked_frames: i32,
+}
+
+pub struct static_rect_slider {
+    cord: Vec2,
+    slider_id: i32,
+    frames: f32, // 0 means the button is false and the max digits means the slider is true
+    going_mode_on: bool, // false = off, true = on
+    clicked_wait: i32,
+    text: String,
 }
 
 pub struct static_rect_data_destination {
@@ -81,7 +98,128 @@ pub struct MainState {
     pause: bool,
     main_font: Font,
     requested_text: Vec<i32>,
-    mode: String,
+    mode: String, // its a or b
+    settings: Settings,
+    show_mode: i32, // 0 - main, 1 - settings
+}
+
+pub struct Settings {
+    clear_mode: bool, // true means clear all, false means clear only false
+    sliders: Vec<static_rect_slider>,
+    buttons: Vec<static_rect_button>,
+}
+
+impl Settings {
+    fn new(ctx: &mut Context) -> GameResult<Settings> {
+        let pos = Settings {
+            clear_mode: true,
+            sliders: Vec::new(),
+            buttons: Vec::new(),
+        };
+        Ok(pos)
+    }
+}
+
+pub fn draw_sliders(
+    mut ctx: &mut Context,
+    rect_cord_mouse: Rect,
+    self_main: &mut MainState,
+) -> Vec<i32> {
+    let mut vec_push: Vec<i32> = Vec::new();
+
+    let weight_x_rect_round: f32 = 200.0;
+    let weight_y_rect_round: f32 = 100.0;
+
+    for slider in &mut self_main.settings.sliders {
+        let rect = Rect::new(
+            slider.cord.x,
+            slider.cord.y,
+            weight_x_rect_round,
+            weight_y_rect_round,
+        );
+
+        let drawmode_width: f32 = 15.0;
+
+        let mut drawmode = DrawMode::Stroke(
+            StrokeOptions::default()
+                .with_start_cap(LineCap::Round)
+                .with_end_cap(LineCap::Round)
+                .with_line_join(LineJoin::Round)
+                .with_line_width(15.0)
+                .with_miter_limit(1.0)
+                .with_tolerance(1.0),
+        );
+
+        let radius_rect: f32 = 50.0;
+
+        let rect_round =
+            graphics::Mesh::new_rounded_rectangle(ctx, drawmode, rect, radius_rect, Color::WHITE)
+                .unwrap();
+        graphics::draw(ctx, &rect_round, (Vec2::new(0.0, 0.0),)).unwrap();
+
+        let radius_circle: f32 = radius_rect - drawmode_width + 9.0;
+        // x 148 min, max 252, cord = 100
+        let min_x = slider.cord.x + radius_circle + 7.0;
+        let max_x = slider.cord.x + weight_x_rect_round - radius_circle - 7.0;
+        let max_frames: f32 = 300.0;
+        let percentage_from_frames: f32 = ((slider.frames * 100.0) / max_frames) / 100.0;
+        let add_min_x: f32 = (max_x - min_x) * percentage_from_frames;
+        let circle_cord_x_calc = min_x + add_min_x;
+        let circle_cord_y = slider.cord.y + (weight_y_rect_round / 2.0);
+
+        let mut color_circle = Color::new(0.0, 0.0, 0.0, 0.0);
+
+        if slider.going_mode_on == false {
+            color_circle = Color::RED;
+            if slider.frames != 0.0 {
+                slider.frames = slider.frames - 1.0;
+            }
+        }
+        if slider.going_mode_on == true {
+            color_circle = Color::GREEN;
+            if slider.frames != max_frames {
+                slider.frames = slider.frames + 1.0;
+            }
+        }
+
+        let circle = graphics::Mesh::new_circle(
+            ctx,
+            DrawMode::fill(),
+            Point2::from([circle_cord_x_calc, circle_cord_y]),
+            radius_circle,
+            1.0,
+            color_circle,
+        )
+        .unwrap();
+
+        graphics::draw(ctx, &circle, (Vec2::new(0.0, 0.0),)).unwrap();
+
+        if slider.clicked_wait == 0 {
+            if rect_cord_mouse.overlaps(&rect) {
+                if button_pressed(ctx, MouseButton::Left) == true {
+                    vec_push.push(slider.slider_id);
+                    slider.clicked_wait = 300;
+                }
+            }
+        } else {
+            slider.clicked_wait = slider.clicked_wait - 1;
+        }
+
+        let mut slider_text = Text::new(slider.text.clone());
+        slider_text.set_font(self_main.main_font, PxScale::from(30.0));
+        let slider_text_cord_x = slider.cord.x + weight_x_rect_round + 30.0;
+        let slider_text_cord_y = slider.cord.y + (weight_y_rect_round / 2.0) - 20.0;
+        graphics::draw(
+            ctx,
+            &slider_text,
+            (
+                Vec2::new(slider_text_cord_x, slider_text_cord_y),
+                Color::WHITE,
+            ),
+        );
+    }
+
+    return vec_push;
 }
 
 impl MainState {
@@ -107,6 +245,8 @@ impl MainState {
             main_font: font,
             requested_text: Vec::new(),
             mode: String::new(),
+            settings: Settings::new(ctx).unwrap(),
+            show_mode: 0,
         };
         Ok(pos)
     }
@@ -131,117 +271,160 @@ impl event::EventHandler<ggez::GameError> for MainState {
         )?;
         graphics::draw(ctx, &rectangle_mouse, (Vec2::new(0.0, 0.0),))?;
 
-        // Draw Main
-        let dst = glam::Vec2::new(825.0, 50.0);
-        graphics::draw(ctx, &self.main, (dst,))?;
+        if self.show_mode == 0 {
+            // Draw Main
+            let dst = glam::Vec2::new(825.0, 50.0);
+            graphics::draw(ctx, &self.main, (dst,))?;
 
-        // destination object
-        for cab in &mut self.static_objects_destination {
-            draw_rec_func(ctx, &mut cab.rect_cord, cab.color);
-            for rec in &mut self.static_objects {
-                draw_rec_func(&mut ctx, &mut rec.rect_cord, rec.color);
-                let dst = glam::Vec2::new(rec.rect_cord.x, rec.rect_cord.y);
-                graphics::draw(ctx, &rec.texture, (dst,))?;
+            // destination object
+            for cab in &mut self.static_objects_destination {
+                draw_rec_func(ctx, &mut cab.rect_cord, cab.color);
+                for rec in &mut self.static_objects {
+                    draw_rec_func(&mut ctx, &mut rec.rect_cord, rec.color);
+                    let dst = glam::Vec2::new(rec.rect_cord.x, rec.rect_cord.y);
+                    graphics::draw(ctx, &rec.texture, (dst,))?;
 
-                if self.pause == false {
-                    move_object(
-                        rect_cord_mouse,
-                        ctx,
-                        rec,
-                        &mut self.object_grabbed,
-                        &mut cab.connected,
-                    );
-                }
-            }
-        }
-        // Rect objects
-
-        manage_objects(
-            rect_cord_mouse,
-            ctx,
-            &mut self.static_objects,
-            &mut self.object_grabbed,
-        );
-
-        for cab_static in &mut self.static_objects_destination {
-            for rec_connect in &mut self.static_objects {
-                grab_overlaps_connect(
-                    &ctx,
-                    &cab_static.rect_cord,
-                    &mut rec_connect.rect_cord,
-                    self.object_grabbed,
-                    &mut cab_static.connected,
-                    rec_connect.object_id,
-                )
-            }
-        }
-
-        let buttons_clicked =
-            manage_all_buttons(ctx, &mut self.static_buttons, rect_cord_mouse, self.pause);
-        if buttons_clicked.contains(&0) {
-            declare_variables(self, ctx);
-        }
-        if buttons_clicked.contains(&1) {
-            if self.pause == false {
-                let mut correctly_connected: bool = true;
-                for connects in &self.static_objects_destination {
-                    if connects.connected == 1000 {
-                        correctly_connected = false;
-                    }
-                }
-                if correctly_connected == true {
                     if self.pause == false {
-                        let mut points = 0;
-                        for connects in &self.static_objects_destination {
-                            if connects.object_id == connects.connected {
-                                points = points + 1;
-                            } else {
-                                points = points - 1;
-                            }
+                        move_object(
+                            rect_cord_mouse,
+                            ctx,
+                            rec,
+                            &mut self.object_grabbed,
+                            &mut cab.connected,
+                        );
+                    }
+                }
+            }
+            // Rect objects
+
+            manage_objects(
+                rect_cord_mouse,
+                ctx,
+                &mut self.static_objects,
+                &mut self.object_grabbed,
+            );
+
+            for cab_static in &mut self.static_objects_destination {
+                for rec_connect in &mut self.static_objects {
+                    grab_overlaps_connect(
+                        &ctx,
+                        &cab_static.rect_cord,
+                        &mut rec_connect.rect_cord,
+                        self.object_grabbed,
+                        &mut cab_static.connected,
+                        rec_connect.object_id,
+                    )
+                }
+            }
+
+            let buttons_clicked =
+                manage_all_buttons(ctx, &mut self.static_buttons, rect_cord_mouse);
+            if buttons_clicked.contains(&0) {
+                declare_variables(self, ctx); // here it is, and oh no
+            }
+            if buttons_clicked.contains(&1) {
+                if self.pause == false {
+                    let mut correctly_connected: bool = true;
+                    for connects in &self.static_objects_destination {
+                        if connects.connected == 1000 {
+                            correctly_connected = false;
                         }
-                        self.pause = true;
-                        self.points = self.points + points;
+                    }
+                    if correctly_connected == true {
+                        if self.pause == false {
+                            let mut points = 0;
+                            for connects in &self.static_objects_destination {
+                                if connects.object_id == connects.connected {
+                                    points = points + 1;
+                                } else {
+                                    points = points - 1;
+                                }
+                            }
+                            self.pause = true;
+                            self.points = self.points + points;
+                        }
+                    } else {
+                        if self.requested_text.contains(&0) == false {
+                            self.requested_text.push(0);
+                        }
                     }
                 } else {
-                    if self.requested_text.contains(&0) == false {
-                        self.requested_text.push(0);
+                    if self.requested_text.contains(&1) == false {
+                        self.requested_text.push(1);
                     }
                 }
-            } else {
-                if self.requested_text.contains(&1) == false {
-                    self.requested_text.push(1);
+            }
+            if buttons_clicked.contains(&2) {
+                for settings_buttons in &mut self.settings.buttons {
+                    if settings_buttons.button_id == 2 {
+                        settings_buttons.clicked_frames = 120;
+                    }
+                }
+                self.show_mode = 1;
+            }
+
+            if self.pause == true {
+                let x_sum: f32 = 44.0;
+                let mut x_cord: f32 = 860.0;
+                for connects in &self.static_objects_destination {
+                    let dst = glam::Vec2::new(x_cord, 723.0);
+                    if connects.object_id == connects.connected {
+                        graphics::draw(ctx, &self.true_image, (dst,));
+                    } else {
+                        graphics::draw(ctx, &self.false_image, (dst,));
+                    }
+                    x_cord = x_cord + x_sum;
                 }
             }
-        }
 
-        if self.pause == true {
-            let x_sum: f32 = 44.0;
-            let mut x_cord: f32 = 860.0;
-            for connects in &self.static_objects_destination {
-                let dst = glam::Vec2::new(x_cord, 723.0);
-                if connects.object_id == connects.connected {
-                    graphics::draw(ctx, &self.true_image, (dst,));
-                } else {
-                    graphics::draw(ctx, &self.false_image, (dst,));
-                }
-                x_cord = x_cord + x_sum;
+            let uniform_scale_24px = PxScale::from(70.0);
+            let mut points_text = Text::new(format!("Points: {}", self.points));
+            points_text.set_font(self.main_font, uniform_scale_24px);
+
+            graphics::draw(ctx, &points_text, (Vec2::new(30.0, 300.0), Color::WHITE))?;
+
+            if self.requested_text.is_empty() == false {
+                manage_requested_text(ctx, &mut self.timed_text, &mut self.requested_text)
             }
+
+            let mut mode_text = Text::new(format!("{}", self.mode));
+            mode_text.set_font(self.main_font, PxScale::from(140.0));
+
+            graphics::draw(ctx, &mode_text, (Vec2::new(425.0, 30.0), Color::WHITE))?;
         }
+        if self.show_mode == 1 {
+            // settings
+            let clicked_sliders = draw_sliders(ctx, rect_cord_mouse, self);
 
-        let uniform_scale_24px = PxScale::from(70.0);
-        let mut points_text = Text::new(format!("Points: {}", self.points));
-        points_text.set_font(self.main_font, uniform_scale_24px);
+            if clicked_sliders.contains(&0) {
+                for slider in &mut self.settings.sliders {
+                    if slider.slider_id == 0 {
+                        if slider.going_mode_on == true {
+                            slider.going_mode_on = false;
+                            self.settings.clear_mode = false;
+                        } else {
+                            slider.going_mode_on = true;
+                            self.settings.clear_mode = true;
+                        }
+                    }
+                }
+            }
 
-        graphics::draw(ctx, &points_text, (Vec2::new(30.0, 300.0), Color::WHITE))?;
+            let clicked_buttons =
+                manage_all_buttons(ctx, &mut self.settings.buttons, rect_cord_mouse);
+            if clicked_buttons.contains(&2) {
+                for main_buttons in &mut self.static_buttons {
+                    if main_buttons.button_id == 2 {
+                        main_buttons.clicked_frames = 120;
+                    }
+                }
+                self.show_mode = 0;
+            }
 
-        if self.requested_text.is_empty() == false {
-            manage_requested_text(ctx, &mut self.timed_text, &mut self.requested_text)
+            let mut tittle_text = Text::new("Settings");
+            tittle_text.set_font(self.main_font, PxScale::from(100.0));
+            graphics::draw(ctx, &tittle_text, (Vec2::new(475.0, 30.0), Color::WHITE))?;
         }
-
-        let mut mode_text = Text::new(format!("{}", self.mode));
-        mode_text.set_font(self.main_font, PxScale::from(140.0));
-
-        graphics::draw(ctx, &mode_text, (Vec2::new(425.0, 30.0), Color::WHITE))?;
 
         graphics::present(ctx)?;
         Ok(())
@@ -282,7 +465,6 @@ pub fn manage_all_buttons(
     ctx: &mut Context,
     mut vector: &mut Vec<static_rect_button>,
     rect_cord_mouse: Rect,
-    pause: bool,
 ) -> Vec<i32> {
     let mut clicked_buttons: Vec<i32> = Vec::new();
     for mut button in vector {
@@ -298,10 +480,12 @@ pub fn manage_all_buttons(
 
         if cursor_type(ctx) == CursorIcon::Grabbing {
         } else {
-            if button.rect_cord.overlaps(&rect_cord_mouse) == true {
-                if button_pressed(ctx, MouseButton::Left) == true {
-                    clicked_buttons.push(button.button_id);
-                    button.clicked_frames = 120;
+            if button.clicked_frames == 0 {
+                if button.rect_cord.overlaps(&rect_cord_mouse) == true {
+                    if button_pressed(ctx, MouseButton::Left) == true {
+                        clicked_buttons.push(button.button_id);
+                        button.clicked_frames = 120;
+                    }
                 }
             }
         }
@@ -437,10 +621,10 @@ pub fn main() -> GameResult {
     let cb = ggez::ContextBuilder::new("etherust", "szybet")
         .window_setup(window_settings)
         .window_mode(windowmode)
-        .modules(ModuleConf {
-            audio: false,
-            gamepad: false,
-        })
+        //.modules(ModuleConf {
+         //   audio: false,
+         //   gamepad: false,
+        //})
         .backend(Backend::OpenGL { major: 3, minor: 2 });
 
     let (mut ctx, event_loop) = cb.build()?;
@@ -560,7 +744,7 @@ pub fn declare_variables(mut state: &mut MainState, ctx: &mut Context) {
         .unwrap(),
         rect_cord: Rect::new(30.0, 30.0, 250.0, 100.0),
         button_id: 0,
-        clicked_frames: 119,
+        clicked_frames: 120,
     };
     state.static_buttons.push(button_reset);
 
@@ -578,6 +762,21 @@ pub fn declare_variables(mut state: &mut MainState, ctx: &mut Context) {
         clicked_frames: 0,
     };
     state.static_buttons.push(check_button);
+
+    let mut settings_button = static_rect_button {
+        color: color_transparent,
+        button_image: graphics::Image::from_bytes(ctx, include_bytes!("../resources/settings.png"))
+            .unwrap(),
+        button_image_clicked: graphics::Image::from_bytes(
+            ctx,
+            include_bytes!("../resources/settings-clicked.png"),
+        )
+        .unwrap(),
+        rect_cord: Rect::new(30.0, 720.0, 40.0, 40.0),
+        button_id: 2,
+        clicked_frames: 0,
+    };
+    state.static_buttons.push(settings_button);
 
     // Here is timed text
     let mut check_error_text = Text::new(format!("Connect all cables first!"));
@@ -605,4 +804,30 @@ pub fn declare_variables(mut state: &mut MainState, ctx: &mut Context) {
         time_count: 300,
     };
     state.timed_text.push(check_error_cables);
+
+    // Sliders for settings
+    let mut clearmode = static_rect_slider {
+        cord: Vec2::new(100.0, 200.0),
+        slider_id: 0,
+        frames: 0.0,
+        going_mode_on: false,
+        clicked_wait: 0,
+        text: String::from("If True, reset clears only not guessed cables"),
+    };
+    state.settings.sliders.push(clearmode);
+
+    let mut settings_button = static_rect_button {
+        color: color_transparent,
+        button_image: graphics::Image::from_bytes(ctx, include_bytes!("../resources/settings.png"))
+            .unwrap(),
+        button_image_clicked: graphics::Image::from_bytes(
+            ctx,
+            include_bytes!("../resources/settings-clicked.png"),
+        )
+        .unwrap(),
+        rect_cord: Rect::new(30.0, 720.0, 40.0, 40.0),
+        button_id: 2, // becouse the same like in main
+        clicked_frames: 0,
+    };
+    state.settings.buttons.push(settings_button);
 }
